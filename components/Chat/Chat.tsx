@@ -63,6 +63,7 @@ export const Chat = memo(({ stopConversationRef }: Props) => {
   const [showSettings, setShowSettings] = useState<boolean>(false);
   const [showScrollDownButton, setShowScrollDownButton] =
     useState<boolean>(false);
+  const [draggedImages, setDraggedImages] = useState<string[]>([]);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const chatContainerRef = useRef<HTMLDivElement>(null);
@@ -308,6 +309,40 @@ export const Chat = memo(({ stopConversationRef }: Props) => {
   };
   const throttledScrollDown = throttle(scrollDown, 250);
 
+const handleDragOver = (event: React.DragEvent<HTMLDivElement>) => {
+  event.preventDefault();
+};
+
+const handleDrop = (event: React.DragEvent<HTMLDivElement>) => {
+  event.preventDefault();
+  const files = event.dataTransfer.files;
+  const fileReadPromises = [];
+
+  for (let i = 0; i < files.length; i++) {
+    if (files[i].type.startsWith('image/')) {
+      const fileReadPromise = new Promise<string | ArrayBuffer>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = (loadEvent) => {
+          if (loadEvent.target?.result) {
+            resolve(loadEvent.target.result);
+          } else {
+            reject(new Error('FileReader did not produce a result.'));
+          }
+        };
+        reader.onerror = () => reject(reader.error);
+        reader.readAsDataURL(files[i]);
+      });
+      fileReadPromises.push(fileReadPromise);
+    }
+  }
+
+  Promise.all(fileReadPromises).then(images => {
+    setDraggedImages((prevImages) => [...prevImages, ...images as string[]]);
+  }).catch(error => {
+    console.error('Error reading files:', error);
+  });
+};
+
   // useEffect(() => {
   //   console.log('currentMessage', currentMessage);
   //   if (currentMessage) {
@@ -349,7 +384,10 @@ export const Chat = memo(({ stopConversationRef }: Props) => {
   }, [messagesEndRef]);
 
   return (
-    <div className="relative flex-1 overflow-hidden bg-white dark:bg-[#343541]">
+    <div className="relative flex-1 overflow-hidden bg-white dark:bg-[#343541]"
+      onDragOver={handleDragOver}
+      onDrop={handleDrop}
+    >
       {!(apiKey || serverSideApiKeyIsSet) ? (
         <div className="mx-auto flex h-full w-[300px] flex-col justify-center space-y-6 sm:w-[600px]">
           <div className="text-center text-4xl font-bold text-black dark:text-white">
@@ -504,6 +542,8 @@ export const Chat = memo(({ stopConversationRef }: Props) => {
               }
             }}
             showScrollDownButton={showScrollDownButton}
+            draggedImages={draggedImages}
+            setDraggedImages={setDraggedImages}
           />
         </>
       )}

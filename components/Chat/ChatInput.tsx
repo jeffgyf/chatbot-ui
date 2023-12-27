@@ -6,6 +6,7 @@ import {
   IconPlayerStop,
   IconRepeat,
   IconSend,
+  IconTrash,
 } from '@tabler/icons-react';
 import {
   KeyboardEvent,
@@ -36,6 +37,8 @@ interface Props {
   stopConversationRef: MutableRefObject<boolean>;
   textareaRef: MutableRefObject<HTMLTextAreaElement | null>;
   showScrollDownButton: boolean;
+  draggedImages: string[];
+  setDraggedImages: React.Dispatch<React.SetStateAction<string[]>>;
 }
 
 export const ChatInput = ({
@@ -45,6 +48,8 @@ export const ChatInput = ({
   stopConversationRef,
   textareaRef,
   showScrollDownButton,
+  draggedImages,
+  setDraggedImages,
 }: Props) => {
   const { t } = useTranslation('chat');
 
@@ -66,6 +71,8 @@ export const ChatInput = ({
   const [images, setImages] = useState<string[]>([]);
   const imageInputRef = useRef<HTMLInputElement | null>(null);
 
+  const chatInputContainerRef = useRef<HTMLDivElement>(null);
+
   const handleImageInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
 
@@ -79,16 +86,28 @@ export const ChatInput = ({
     }
   };
 
-  const ImagePreview = ({ images }: { images: string[] }) => {
+  const handleRemoveImage = (index: number) => {
+    setImages((prevImages) => prevImages.filter((_, i) => i !== index));
+  };
+
+  const ImagePreview = ({ images, onRemoveImage }: { images: string[]; onRemoveImage: (index: number) => void }) => {
     return (
-      <div className="flex flex-wrap gap-2 mb-2">
+      <div className="relative flex flex-wrap gap-2">
         {images.map((image, index) => (
-          <img
-            key={index}
-            src={image}
-            alt={`uploaded-${index}`}
-            className="w-20 h-20 object-cover rounded-md border"
-          />
+          <div key={index} className="relative">
+            <img
+              src={image}
+              alt={`uploaded-${index}`}
+              className="w-20 h-20 object-cover mt-3 mb-3 ml-3 rounded-md"
+            />
+            <IconTrash
+              className="absolute top-0 right-0 w-5 h-5 p-0 border-solid border border-1 dark:text-neutral-400 dark:hover:text-neutral-100 border-neutral-600 bg-white dark:bg-neutral-800 dark:border-neutral-800 dark:hover:bg-neutral-600 dark:text-white rounded-md text-neutral-700 hover:bg-red-100 cursor-pointer"
+              size={18}
+              onClick={() => 
+                onRemoveImage(index)
+              }
+            />
+          </div>
         ))}
       </div>
     );
@@ -122,31 +141,41 @@ export const ChatInput = ({
     updatePromptListVisibility(value);
   };
 
-  const handleSend = () => {
-    if (messageIsStreaming) {
-      return;
-    }
+const handleSend = () => {
+  if (messageIsStreaming) {
+    return;
+  }
 
-    if (!content) {
-      alert(t('Please enter a message'));
-      return;
-    }
+  const hasContent = content && content.trim() !== '';
+  const hasImages = images.length > 0;
 
-    var messageContent:Content[] = [{"type": "text", "text": content}];
-    if(images && images.length >0){
-      var imageMessages = images.map(image => { return {type: "image_url", image_url:{"url": image}}});
-      messageContent = [...messageContent, ...imageMessages]
-    }
+  if (!hasContent && !hasImages) {
+    alert(t('Please enter a message'));
+    return;
+  }
 
-    onSend({ role: 'user', content:messageContent }, plugin);
-    setImages([]);
-    setContent('');
-    setPlugin(null);
+  const messageContent: Content[] = [];
 
-    if (window.innerWidth < 640 && textareaRef && textareaRef.current) {
-      textareaRef.current.blur();
-    }
-  };
+  if (hasContent) {
+    messageContent.push({ type: 'text', text: content });
+  }
+
+  if (hasImages) {
+    const imageMessages = images.map((image) => ({
+      type: 'image_url',
+      image_url: { url: image },
+    }));
+    messageContent.push(...imageMessages);
+  }
+
+  onSend({ role: 'user', content: messageContent }, plugin);
+  setImages([]);
+  setContent('');
+
+  if (window.innerWidth < 640 && textareaRef && textareaRef.current) {
+    textareaRef.current.blur();
+  }
+};
 
   const handleStopConversation = () => {
     stopConversationRef.current = true;
@@ -265,6 +294,43 @@ export const ChatInput = ({
     }
   };
 
+  const handlePaste: EventListener = (e: Event) => {
+    const clipboardEvent = e as ClipboardEvent;
+    const items = clipboardEvent.clipboardData?.items;
+  
+    if (items) {
+      for (let i = 0; i < items.length; i++) {
+        const item = items[i];
+  
+        if (item.type.indexOf('image') !== -1) {
+          const blob = item.getAsFile();
+          if (blob) {
+            const reader = new FileReader();
+            reader.onloadend = () => {
+              const base64Image = reader.result as string;
+              setImages((prevImages) => [...prevImages, base64Image]);
+            };
+            reader.readAsDataURL(blob);
+          }
+        } else if (item.type === 'text/plain') {
+          item.getAsString((text) => {
+            // Handle pasted text if needed
+          });
+        }
+      }
+    }
+  };
+
+  useEffect(() => {
+    if (textareaRef && textareaRef.current) {
+      textareaRef.current.addEventListener('paste', handlePaste);
+
+      return () => {
+        textareaRef.current?.removeEventListener('paste', handlePaste);
+      };
+    }
+  }, [textareaRef]);
+
   useEffect(() => {
     if (promptListRef.current) {
       promptListRef.current.scrollTop = activePromptIndex * 30;
@@ -297,8 +363,16 @@ export const ChatInput = ({
     };
   }, []);
 
+  useEffect(() => {
+    if (draggedImages.length > 0) {
+      setImages((prevImages) => [...prevImages, ...draggedImages]);
+      setDraggedImages([]); // Clear the dragged images state after integration
+    }
+  }, [draggedImages, setDraggedImages]);
+
   return (
-    <div className="absolute bottom-0 left-0 w-full border-transparent bg-gradient-to-b from-transparent via-white to-white pt-6 dark:border-white/20 dark:via-[#343541] dark:to-[#343541] md:pt-2">
+    <div ref={chatInputContainerRef} 
+    className="absolute bottom-0 left-0 w-full border-transparent bg-gradient-to-b from-transparent via-white to-white pt-6 dark:border-white/20 dark:via-[#343541] dark:to-[#343541] md:pt-2">
       <div className="stretch mx-2 mt-4 flex flex-row gap-3 last:mb-2 md:mx-4 md:mt-[52px] md:last:mb-6 lg:mx-auto lg:max-w-3xl">
         {messageIsStreaming && (
           <button
@@ -321,7 +395,7 @@ export const ChatInput = ({
           )}
 
         <div className="relative mx-2 flex w-full flex-grow flex-col rounded-md border border-black/10 bg-white shadow-[0_0_10px_rgba(0,0,0,0.10)] dark:border-gray-900/50 dark:bg-[#40414F] dark:text-white dark:shadow-[0_0_15px_rgba(0,0,0,0.10)] sm:mx-4">
-          <ImagePreview images={images} />
+          <ImagePreview images={images} onRemoveImage={handleRemoveImage} />
 
 
 
